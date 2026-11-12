@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Тесты по фармакологии, препаратам и определениям к зачёту. Проверка ответов и повторение ошибок.">
+  <meta name="theme-color" content="#0d1322">
+  <title>ФармТест - фармакология в тестах</title>
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <meta name="profile-code-endpoint" content="https://pharm-test.ygtuilya.chatgpt.site/api/profile-code">
+  <script>
+    try {
+      if (localStorage.getItem("pharmtest:theme") === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+        document.querySelector('meta[name="theme-color"]').content = "#f7f8f3";
+      }
+    } catch (error) {}
+
+    if (typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches) {
+      document.querySelector('meta[name="viewport"]').content = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no";
+      var preventZoom = function (event) {
+        if (event.cancelable) event.preventDefault();
+      };
+      document.addEventListener("gesturestart", preventZoom, { passive: false });
+      document.addEventListener("gesturechange", preventZoom, { passive: false });
+      if (!window.CSS || typeof window.CSS.supports !== "function" || !window.CSS.supports("touch-action", "pan-x pan-y")) {
+        document.addEventListener("touchmove", function (event) {
+          if (event.touches.length > 1) preventZoom(event);
+        }, { passive: false });
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./questions.js" defer></script>
+  <script src="./drugs.js" defer></script>
+  <script src="./definitions.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">К основному содержанию</a>
+  <header class="site-header">
+    <div class="shell topbar">
+      <a class="brand" href="#/" aria-label="ФармТест, главная">
+        <img src="./assets/icon.svg" width="36" height="36" alt="">
+        <span>Фарм<span class="brand-accent">Тест</span></span>
+      </a>
+      <nav class="nav" aria-label="Основное меню">
+        <a class="nav-link" href="#/sections" data-nav="sections">Разделы</a>
+        <a class="nav-link" href="#/progress" data-nav="progress">
+          <svg class="icon nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16M7 15v-4m5 4V8m5 7V5"/></svg>
+          <span>Прогресс</span>
+        </a>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Тёмная тема" aria-pressed="true" hidden></button>
+      </nav>
+    </div>
+  </header>
+  <main class="shell main" id="main-content" tabindex="-1">
+    <noscript>
+      <section class="panel">
+        <h1>Фармакология в тестах</h1>
+        <p>Включите JavaScript в браузере, чтобы открыть тесты.</p>
+      </section>
+    </noscript>
+    <div id="app"></div>
+  </main>
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <span class="footer-brand">ФармТест</span>
+      <span class="footer-credit">Fero Technology</span>
+      <span class="footer-description">Учебный тренажёр по фармакологии</span>
+    </div>
+  </footer>
+</body>
+</html>
