@@ -11,12 +11,13 @@
   var medicineTopic = {
     id: "medicines",
     title: "Препараты и их группы",
-    description: "Лекарственные группы, действующие вещества и торговые названия из всех шести конспектов.",
+    description: "Лекарственные группы, действующие вещества и торговые названия из всех тем курса.",
     modeTitle: "Весь тест",
     modeDescription: "Все вопросы из банка в случайном порядке.",
     icon: "capsule",
     theme: "lilac",
-    questions: []
+    questions: [],
+    previousFullLength: 238
   };
   var definitionsTopic = {
     id: "definitions",
@@ -130,6 +131,9 @@
     heart: '<path d="M20.8 5.9a4.6 4.6 0 0 0-6.5 0L12 8.2 9.7 5.9a4.6 4.6 0 0 0-6.5 6.5l8.8 8.1 8.8-8.1a4.6 4.6 0 0 0 0-6.5Z"/><path d="M4 12h4l2-3 3 6 2-3h5"/>',
     microbe: '<path d="M18.4 5.6a5.5 5.5 0 0 1 0 7.8l-5 5a5.5 5.5 0 1 1-7.8-7.8l5-5a5.5 5.5 0 0 1 7.8 0ZM17 4l1-2m2 6 2-1m-3 7 2 2M8 20l-1 2m-3-6-2 1m3-7-2-2m8-2-1-3"/><path d="M9 15h.01m3-3h.01m3-3h.01"/>',
     shuffle: '<path d="M3 6h2c6.5 0 7.5 12 14 12h2m-4-4 4 4-4 4M3 18h2c2.2 0 3.8-1.4 5.1-3.1m3.8-5.8C15.2 7.4 16.8 6 19 6h2m-4-4 4 4-4 4"/>',
+    lungs: '<path d="M12 3v8m0-2-3 3m3-3 3 3M9 6C7 5 3 10 3 15v3c0 1.4 1.3 2.4 2.6 2L9 19a2 2 0 0 0 1.4-2v-3M15 6c2-1 6 4 6 9v3c0 1.4-1.3 2.4-2.6 2L15 19a2 2 0 0 1-1.4-2v-3"/>',
+    stomach: '<path d="M10 3v4a2 2 0 0 0 3.3 1.5c2.8-2.2 7.2-.1 7.2 4.8 0 4-3.1 6.7-7.5 6.7H9a2.5 2.5 0 0 1-2.5-2.5V17c0-1-.7-1.7-1.7-1.7H3m10-12v2"/>',
+    shield: '<path d="M12 22s7-3.8 7-9V5l-7-3-7 3v8c0 5.2 7 9 7 9Z"/><path d="m9 12 2 2 4-4"/>',
     book: '<path d="M12 7c-2-1.6-5.1-2.3-9-1.7v12c3.9-.6 7 .1 9 1.7 2-1.6 5.1-2.3 9-1.7v-12c-3.9-.6-7 .1-9 1.7Zm0 0v12"/>',
     right: '<path d="M4 12h15m-6-6 6 6-6 6"/>',
     left: '<path d="M20 12H5m6 6-6-6 6-6"/>',
@@ -243,7 +247,7 @@
   }
 
   function isFullLength(length, topicId) {
-    if (length === topicTotal(topicId)) return true;
+    if (length === topicTotal(topicId) || length === topicById[topicId].previousFullLength) return true;
     if (topicId === mixed.id) return length === previousMixedLength;
     if (!medicineBanks[topicId]) return false;
     return length === previousSectionLength || length === previousTheoryLength ||
@@ -747,7 +751,7 @@
       '<img src="' + asset + '.jpg" width="1120" height="747" alt="" fetchpriority="high"></picture>' +
       '<div class="hero-copy"><span class="hero-label">' + icon("book", true) + 'Тесты по конспектам</span>' +
       '<h1 id="page-title" tabindex="-1">Фармакология <span>в тестах</span></h1>' +
-      '<p>Выберите тему или проверьте себя в смешанном тесте.</p>' +
+      '<p>Выберите одну из ' + sections.length + ' тем курса или проверьте себя в смешанном тесте.</p>' +
       '<div class="hero-actions"><a class="button" href="' + testLink(mixed.id) + '">' +
       icon("shuffle", true) + mixedLabel + '</a><span class="hero-count">' + questionsLabel(mixedTotal) + '</span></div></div></section>' +
       '<section class="section-list" id="sections" aria-labelledby="sections-title">' +
@@ -785,7 +789,18 @@
 
   function renderModeMenu(topic) {
     return '<div class="page-narrow">' + backLink() + topicHeading(topic, topic.title, topic.description) +
-      '<div class="mode-grid">' + modesBySection[topic.id].map(function (mode) { return renderTopicCard(mode, true); }).join("") + '</div></div>';
+      '<div class="mode-grid">' + modesBySection[topic.id].map(function (mode) { return renderTopicCard(mode, true); }).join("") + '</div>' +
+      (topic.id === "efferent" ? renderAutonomicNotes() : '') + '</div>';
+  }
+
+  function renderAutonomicNotes() {
+    return '<details class="review-item autonomic-notes"><summary>' + icon("book", true) +
+      '<span>Симпатика и парасимпатика</span></summary><div class="review-copy">' +
+      '<img src="./assets/efferent-notes.png" alt="Фото таблицы эффектов симпатической и парасимпатической стимуляции" width="558" height="449" loading="lazy">' +
+      '<p><strong>Мочевой пузырь.</strong> При накоплении мочи симпатические сигналы расслабляют детрузор и сокращают внутренний сфинктер. При мочеиспускании парасимпатические сигналы сокращают детрузор.</p>' +
+      '<p><strong>Матка и глаз.</strong> Эффект зависит от рецепторов и ткани. Стимуляция β₂-рецепторов расслабляет миометрий. В глазу мускариновая стимуляция ресничной мышцы может облегчить отток внутриглазной жидкости.</p>' +
+      '<p><strong>Железы и давление.</strong> Парасимпатические сигналы усиливают выделение слюны и желудочного сока. Симпатический эффект на секрецию зависит от железы, а влияние на давление связано с работой сердца и сосудов.</p>' +
+      '</div></details>';
   }
 
   function renderChoice(question, position, optionIndex, selected, answer, reveal) {
