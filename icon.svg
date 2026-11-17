@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="frame" x1="5" y1="3" x2="61" y2="63" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#314B73"/>
+      <stop offset="1" stop-color="#172339"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="21" y1="13" x2="43" y2="41" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#BDEBFF"/>
+      <stop offset="1" stop-color="#729EF0"/>
+    </linearGradient>
+    <linearGradient id="shell" x1="21" y1="33" x2="44" y2="51" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7FAFF"/>
+      <stop offset="1" stop-color="#C3D5EE"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="62" height="62" rx="18" fill="url(#frame)"/>
+  <rect x="1.75" y="1.75" width="60.5" height="60.5" rx="17.25" stroke="#B6D2FF" stroke-opacity=".32" stroke-width="1.5"/>
+  <g transform="rotate(42 32 32)">
+    <rect x="21" y="11" width="22" height="42" rx="11" fill="url(#glass)"/>
+    <path d="M21 32h22v10a11 11 0 1 1-22 0V32Z" fill="url(#shell)"/>
+    <path d="M21 32h22" stroke="#D6EBFF" stroke-width="1.35"/>
+    <path d="m27 22.9 3.4 3.3 6.6-6.7" stroke="#213B63" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <path d="M49 45v7m-3.5-3.5h7" stroke="#A9C9FC" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

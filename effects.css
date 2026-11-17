@@ -1,0 +1,35 @@
+.sound-toggle[hidden] { display: none; }
+.feedback { position: relative; }
+.sound-toggle { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; margin-left: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); color: var(--forest-dark); cursor: pointer; flex-shrink: 0; transition: background .2s, transform .2s; }
+.sound-toggle:disabled { opacity: .5; cursor: default; }
+.sound-toggle[aria-pressed="false"] { color: var(--muted); }
+.sound-toggle:focus-visible { outline: 3px solid #a0b9eb; outline-offset: 3px; }
+[data-theme="dark"] .sound-toggle { background: #1e2d47; border-color: #273650; }
+.feedback { position: relative; }
+.feedback-heading { display: flex; align-items: center; gap: 11px; }
+.feedback-symbol { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 35px; height: 35px; border: 1px solid #5481684a; border-radius: 12px; color: #326a4a; background: #5c997416; }
+.feedback.is-wrong .feedback-symbol { color: #a3463d; border-color: #aa66584a; background: #be716616; }
+[data-theme="dark"] .feedback-symbol { color: #b9ddce; border-color: #82b9a354; background: #82b9a318; }
+[data-theme="dark"] .feedback.is-wrong .feedback-symbol { color: #efb6ac; border-color: #c68a8054; background: #c68a8018; }
+.feedback-heading { display: flex; align-items: center; gap: 10px; }
+.feedback-symbol { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex-shrink: 0; }
+.feedback-streak { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; }
+.fx-correct .feedback-symbol { animation: answer-bounce .48s cubic-bezier(.2,.8,.3,1); }
+.fx-correct { animation: answer-glow .7s ease-out; }
+.fx-wrong { animation: answer-nudge .32s ease-out; }
+.fx-advance { animation: answer-saved .36s ease-out; }
+.fx-result .score { animation: result-bounce .7s cubic-bezier(.2,.8,.3,1); }
+.fx-burst { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.fx-burst i { position: absolute; left: 31px; top: 30px; width: 5px; height: 5px; border-radius: 2px; background: var(--color); opacity: 0; animation: answer-particle .62s var(--delay) ease-out forwards; }
+.fx-confetti { position: fixed; inset: 0; z-index: 20; overflow: hidden; pointer-events: none; }
+.fx-confetti i { position: absolute; top: -14px; width: 7px; height: 11px; border-radius: 2px; background: var(--color); opacity: 0; animation: result-confetti 1.35s var(--delay) cubic-bezier(.2,.55,.5,1) forwards; }
+@keyframes answer-bounce { 0% { transform: scale(.7) rotate(-12deg); } 45% { transform: scale(1.12) rotate(5deg); } 75% { transform: scale(.97); } 100% { transform: scale(1); } }
+@keyframes answer-glow { 0% { box-shadow: 0 0 0 0 #91c2b136; } 65% { box-shadow: 0 0 0 7px #91c2b100; } 100% { box-shadow: 0 0 0 0 #91c2b100; } }
+@keyframes answer-nudge { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 60% { transform: translateX(3px); } 82% { transform: translateX(-1px); } }
+@keyframes answer-saved { 50% { filter: brightness(1.15); } }
+@keyframes result-bounce { 0% { transform: scale(.88); } 45% { transform: scale(1.08); } 75% { transform: scale(.98); } 100% { transform: scale(1); } }
+@keyframes answer-particle { 0% { opacity: 0; transform: translate(0,0) scale(.5); } 20% { opacity: .9; } 100% { opacity: 0; transform: translate(var(--x),var(--y)) rotate(var(--turn)) scale(.6); } }
+@keyframes result-confetti { 0% { opacity: 0; transform: translateY(-15px) rotate(0deg); } 10% { opacity: .9; } 75% { opacity: .8; } 100% { opacity: 0; transform: translate(var(--x),85vh) rotate(var(--turn)); } }
+@media (hover:hover) { .sound-toggle:hover:enabled { background: #edf2e9; transform: translateY(-1px); } [data-theme="dark"] .sound-toggle:hover:enabled { background: #2a3e61; } }
+@media (max-width:620px) { .sound-toggle { width: 38px; height: 38px; border-radius: 11px; padding: 9px; margin-left: 2px; } .nav .theme-toggle { width: 38px; height: 38px; margin-left: 2px; } .nav-link { padding: 0 5px; } .feedback-streak { font-size: 11px; } }
+@media (prefers-reduced-motion:reduce) { .fx-correct, .fx-correct .feedback-symbol, .fx-wrong, .fx-advance, .fx-result .score { animation: none; } .fx-burst, .fx-confetti { display: none; } .sound-toggle { transition: none; } .sound-toggle:hover:enabled { transform: none; } }

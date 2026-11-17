@@ -1155,11 +1155,26 @@
       '<span class="choice-text">' + escapeHtml(question.options[optionIndex]) + '</span>' + marker + '</span></label>';
   }
 
-  function renderFeedback(question, answer) {
+  function reactToAnswer(kind) {
+    if (window.PharmEffects) window.PharmEffects.react(kind);
+  }
+
+  function reactToResult(attempt) {
+    reactToAnswer(correctCount(attempt) === attempt.steps.length ? "perfect" : "complete");
+  }
+
+  function answerStreak(attempt) {
+    var count = 0;
+    for (var index = attempt.cursor; index >= 0 && attempt.steps[index].answer === 0; index -= 1) count += 1;
+    return count;
+  }
+
+  function renderFeedback(question, answer, streak) {
     if (answer === null) return "";
     var correct = answer === 0;
     return '<div class="feedback' + (correct ? "" : " is-wrong") + '" id="answer-feedback" tabindex="-1" role="status">' +
-      '<strong>' + (correct ? "Верно" : "Ответ неверный") + '</strong>' +
+      '<div class="feedback-heading"><span class="feedback-symbol" aria-hidden="true">' + icon(correct ? "check" : "cross", true) + '</span><div><strong>' + (correct ? "Верно" : "Ответ неверный") + '</strong>' +
+      (correct && streak >= 3 ? '<span class="feedback-streak">' + countLabel(streak, "верный ответ подряд", "верных ответа подряд", "верных ответов подряд") + '</span>' : '') + '</div></div>' +
       (correct ? '' : '<p>Правильный ответ - ' + escapeHtml(question.options[0]) + '.</p>') +
       (question.explanation ? '<p>' + escapeHtml(question.explanation) + '</p>' : '') + '</div>';
   }
@@ -1204,7 +1219,7 @@
       step.order.map(function (optionIndex, position) {
         return renderChoice(question, position, optionIndex, attempt.selected, step.answer, !delayedFeedback);
       }).join("") + '</fieldset>' +
-      (delayedFeedback ? '' : renderFeedback(question, step.answer)) +
+      (delayedFeedback ? '' : renderFeedback(question, step.answer, answerStreak(attempt))) +
       '<div class="quiz-actions"><button class="button" ' + buttonType + disabled + '>' + action +
       (advances ? icon("right", true) : '') + '</button></div></form></section>' +
       '<div class="attempt-actions" role="group" aria-label="Управление тестом">' +
@@ -1448,6 +1463,7 @@
   }
 
   function renderPage(focusId, toTop) {
+    if (window.PharmEffects) window.PharmEffects.cancel();
     var route = routeFromHash();
     if (!activeProfileId) {
       app.innerHTML = renderWelcome();
@@ -1552,8 +1568,11 @@
     saveRecord(route.topicId);
     if (delayedFeedback) {
       renderPage(attempt.complete ? "page-title" : "question-title", true);
+      if (attempt.complete) reactToResult(attempt);
+      else reactToAnswer("advance");
     } else {
       renderPage("answer-feedback", false);
+      reactToAnswer(step.answer === 0 ? "correct" : "wrong");
     }
   });
 
@@ -1646,6 +1665,7 @@
     if (route.page !== "test") return;
     var record = records[route.topicId];
     var attempt = record.attempt;
+    var wasComplete = attempt.complete;
     if (action === "filter-mistakes" && attempt.complete) {
       var onlyMistakes = button.getAttribute("aria-pressed") !== "true";
       button.setAttribute("aria-pressed", String(onlyMistakes));
@@ -1674,6 +1694,7 @@
     }
     saveRecord(route.topicId);
     renderPage(record.attempt.complete ? "page-title" : "question-title", true);
+    if (!wasComplete && record.attempt.complete) reactToResult(record.attempt);
   });
 
   app.addEventListener("keydown", function (event) {
