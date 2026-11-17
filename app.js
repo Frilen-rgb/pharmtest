@@ -8,16 +8,18 @@
   var mixedLength = 60;
   var medicineQuickLength = 40;
   var sectionQuickLength = 30;
+  var questionCategories = window.PHARM_QUESTION_CATEGORIES || [];
   var medicineTopic = {
     id: "medicines",
     title: "Препараты и их группы",
-    description: "Лекарственные группы, действующие вещества и торговые названия из всех тем курса.",
+    description: "Лекарственные группы, определения, действие препаратов, показания и побочные эффекты из тем курса.",
     modeTitle: "Весь тест",
     modeDescription: "Все вопросы из банка в случайном порядке.",
     icon: "capsule",
     theme: "lilac",
     questions: [],
-    previousFullLength: 238
+    previousFullLength: 238,
+    previousFullLengths: window.PHARM_PREVIOUS_MEDICINE_LENGTHS || []
   };
   var definitionsTopic = {
     id: "definitions",
@@ -30,7 +32,7 @@
   var mixed = {
     id: "mixed",
     title: "Смешанный тест",
-    description: "Теория, препараты и определения из всех разделов. Ответы после завершения.",
+    description: "Определения, препараты, фармакологические эффекты, показания и побочные эффекты. Ответы после завершения.",
     icon: "shuffle",
     theme: "mint"
   };
@@ -260,7 +262,9 @@
   }
 
   function isFullLength(length, topicId) {
-    if (length === topicTotal(topicId) || length === topicById[topicId].previousFullLength) return true;
+    var topic = topicById[topicId];
+    if (length === topicTotal(topicId) || length === topic.previousFullLength ||
+        topic.previousFullLengths && topic.previousFullLengths.indexOf(length) !== -1) return true;
     if (topicId === mixed.id) return length === previousMixedLength;
     if (!medicineBanks[topicId]) return false;
     return length === previousSectionLength || length === previousTheoryLength ||
@@ -819,17 +823,52 @@
     scheduleBackup(activeProfileId);
   }
 
+  function categoryCounts(questions) {
+    var counts = Object.create(null);
+    questions.forEach(function (question) {
+      if (question.category) counts[question.category] = (counts[question.category] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function variedQuestions(pool, count) {
+    if (count >= pool.length || !questionCategories.length) return pool.slice(0, count);
+    var selected = [];
+    var categories = shuffle(questionCategories.filter(function (category) {
+      return pool.some(function (question) { return question.category === category.id; });
+    }));
+    var rounds = count >= categories.length * 2 ? 2 : 1;
+    for (var round = 0; round < rounds; round += 1) {
+      categories.forEach(function (category) {
+        if (selected.length >= count) return;
+        var match = pool.find(function (question) {
+          return question.category === category.id && selected.indexOf(question) === -1;
+        });
+        if (match) selected.push(match);
+      });
+    }
+    pool.forEach(function (question) {
+      if (selected.length < count && selected.indexOf(question) === -1) selected.push(question);
+    });
+    return shuffle(selected);
+  }
+
   function shuffledBankQuestions(topicId, bank) {
     var pool = shuffle(bank);
     var count = topicTotal(topicId);
-    var questions = pool.slice(0, count);
+    var questions = variedQuestions(pool, count);
     var previous = records[topicId].attempt;
     if (!previous) return questions;
 
     if (count < pool.length) {
       var previousIds = previous.steps.map(function (step) { return step.id; });
       if (questions.every(function (question) { return previousIds.indexOf(question.id) !== -1; })) {
-        questions[0] = pool[count];
+        var replacement = pool.find(function (question) {
+          return previousIds.indexOf(question.id) === -1 && questions.indexOf(question) === -1;
+        });
+        var counts = categoryCounts(questions);
+        var position = questions.findIndex(function (question) { return !question.category || counts[question.category] > 1; });
+        if (replacement) questions[Math.max(0, position)] = replacement;
       }
     }
     if (questions.length > 1 && questions[0].id === previous.steps[0].id) {
@@ -838,14 +877,54 @@
     return questions;
   }
 
+  function mixedCategoryCoverage(questions, groups) {
+    questionCategories.forEach(function (category) {
+      if (questions.some(function (question) { return question.category === category.id; })) return;
+      var counts = categoryCounts(questions);
+      shuffle(groups).some(function (section) {
+        var replacement = shuffle(section.questions).find(function (question) {
+          return question.category === category.id && questions.indexOf(question) === -1;
+        });
+        if (!replacement) return false;
+        var position = questions.findIndex(function (question) {
+          return questionById[question.id].section.id === section.id &&
+            (!question.category || counts[question.category] > 1);
+        });
+        if (position === -1) return false;
+        questions[position] = replacement;
+        return true;
+      });
+    });
+    var previous = records[mixed.id].attempt;
+    if (previous) {
+      var previousIds = previous.steps.map(function (step) { return step.id; });
+      if (questions.every(function (question) { return previousIds.indexOf(question.id) !== -1; })) {
+        var counts = categoryCounts(questions);
+        shuffle(groups).some(function (section) {
+          var replacement = section.questions.find(function (question) { return previousIds.indexOf(question.id) === -1; });
+          if (!replacement) return false;
+          var position = questions.findIndex(function (question) {
+            return questionById[question.id].section.id === section.id &&
+              (!question.category || counts[question.category] > 1);
+          });
+          if (position === -1) return false;
+          questions[position] = replacement;
+          return true;
+        });
+      }
+    }
+    return shuffle(questions);
+  }
+
   function randomQuestions(topicId) {
     if (topicId === mixed.id) {
       var groups = shuffle(fullSectionTopics.concat(definitionsTopic));
       var perGroup = Math.floor(mixedLength / groups.length);
       var remainder = mixedLength % groups.length;
-      return shuffle(groups.reduce(function (all, section, index) {
+      var questions = groups.reduce(function (all, section, index) {
         return all.concat(shuffle(section.questions).slice(0, perGroup + (index < remainder ? 1 : 0)));
-      }, []));
+      }, []);
+      return mixedCategoryCoverage(questions, groups);
     }
     return shuffledBankQuestions(topicId, topicById[topicId].questions);
   }
@@ -1027,8 +1106,24 @@
       '<p>' + escapeHtml(description) + '</p></div></div>';
   }
 
+  function renderCoverage(topic) {
+    var categories = questionCategories.filter(function (category) {
+      return topic.questions.some(function (question) { return question.category === category.id; });
+    });
+    if (!categories.length) return "";
+    return '<section class="test-coverage" aria-label="Типы вопросов"><h2>Что встречается в тесте</h2><ul>' +
+      categories.map(function (category) {
+        return '<li class="coverage-pill category-' + category.id + '">' + escapeHtml(category.label) + '</li>';
+      }).join("") + '</ul><p>Новая случайная подборка включает все показанные типы вопросов.</p></section>';
+  }
+
+  function renderQuestionCategory(question) {
+    var category = questionCategories.find(function (item) { return item.id === question.category; });
+    return category ? '<span class="question-category category-' + category.id + '">' + escapeHtml(category.label) + '</span>' : "";
+  }
+
   function renderModeMenu(topic) {
-    return '<div class="page-narrow">' + backLink() + topicHeading(topic, topic.title, topic.description) +
+    return '<div class="page-narrow">' + backLink() + topicHeading(topic, topic.title, topic.description) + renderCoverage(topic) +
       '<div class="mode-grid">' + modesBySection[topic.id].map(function (mode) { return renderTopicCard(mode, true); }).join("") + '</div>' +
       (topic.id === "efferent" ? renderAutonomicNotes() : '') + '</div>';
   }
@@ -1087,10 +1182,10 @@
     var description = topic.modeDescription || topic.description;
     if (topic.id === definitionsTopic.id && entry.replacementId) description = "Подберите определение к каждому термину.";
     if (legacyMixed) description = "Начатая попытка. Ответы после завершения.";
-    else if (topic.modeTitle && total < topicTotal(topic.id)) description = "Продолжите начатую попытку.";
+    else if (topic.modeTitle && total < topicTotal(topic.id)) description = "Сохранённая попытка. Новые вопросы появятся при запуске заново.";
     if (attempt.review) description = delayedFeedback ? "Повторение вопросов. Ответы после завершения." : "Повторение вопросов";
     var hint = "Выберите один вариант";
-    if (entry.section.id === definitionsTopic.id) {
+    if (entry.section.id === definitionsTopic.id || question.category === "definition") {
       hint = entry.replacementId ? "Выберите определение термина" : "Выберите термин по определению";
     }
     if (checked) hint = delayedFeedback ? "Ответ сохранён" : "Ответ проверен";
@@ -1103,7 +1198,7 @@
       '<span style="--fill:' + percent(filled, total) + '%;--prior:' + percent(prior, total) + '%"></span></div>' +
       '<section class="panel' + (checked ? "" : " enter") + '" aria-labelledby="question-title">' +
       (delayedFeedback ? '<span class="question-topic theme-' + entry.section.theme + '">' + escapeHtml(entry.section.title) + '</span>' : '') +
-      '<h2 class="question-title" id="question-title" tabindex="-1">' + escapeHtml(question.text) + '</h2>' +
+      renderQuestionCategory(question) + '<h2 class="question-title" id="question-title" tabindex="-1">' + escapeHtml(question.text) + '</h2>' +
       '<p class="question-hint">' + hint + '</p>' +
       '<form id="question-form"><fieldset class="choices"><legend class="visually-hidden">' + escapeHtml(question.text) + '</legend>' +
       step.order.map(function (optionIndex, position) {

@@ -120,3 +120,16 @@
 @media (prefers-reduced-motion: reduce) {
   .custom-card:hover, .add-question:hover { transform: none; }
 }
+
+.test-coverage { margin: 0 0 24px; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
+.test-coverage h2 { margin: 0 0 14px; font-size: 16px; letter-spacing: -.02em; }
+.test-coverage ul { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.coverage-pill, .question-category { display: inline-flex; align-items: center; padding: 7px 11px; border: 1px solid #839cc63b; background: #7e9fd314; color: var(--ink); border-radius: 10px; font-size: 12px; font-weight: 650; line-height: 1.5; }
+.test-coverage p { font-size: 12px; color: var(--muted); margin: 14px 0 0; line-height: 1.6; }
+.question-category { margin: 0 0 13px; }
+.category-definition { border-color: #8fa9db66; background: #739ddd16; }
+.category-medicine { border-color: #a99ed466; background: #a491e316; }
+.category-effect { border-color: #72afc166; background: #70b5cc16; }
+.category-indication { border-color: #a7b78266; background: #a9bd7016; }
+.category-adverse { border-color: #c5a08166; background: #d4a17816; }
+@media (max-width: 620px) { .test-coverage { padding: 17px; } .coverage-pill { font-size: 11px; padding: 7px 9px; } }
