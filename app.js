@@ -66,6 +66,14 @@
   var questionById = Object.create(null);
   var profileRecords = Object.create(null);
   var profileIdentities = Object.create(null);
+  var profileContents = Object.create(null);
+  var backupJobs = Object.create(null);
+  var customContent = { tests: [], draft: null };
+  var builtinTopics = topics.slice();
+  var contentPrefix = "pharmtest:content:v2:";
+  var codeSeenPrefix = "pharmtest:code-seen:v2:";
+  var codeNotice = null;
+  var welcomeMode = "create";
   var storagePrefix = "pharmtest:v1:";
   var profilePrefix = "pharmtest:profile:v1:";
   var profileCodePrefix = "pharmtest:profile-code:v1:";
@@ -73,8 +81,8 @@
   var codeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
   var codePattern = /^[2-9A-HJ-NP-Z]{16}$/;
   var defaultProfile = { id: "default", name: "Мой профиль" };
-  var profiles = [defaultProfile];
-  var activeProfileId = defaultProfile.id;
+  var profiles = [];
+  var activeProfileId = null;
   var records;
   var themeKey = "pharmtest:theme";
   var storageAvailable = true;
@@ -135,9 +143,13 @@
     stomach: '<path d="M10 3v4a2 2 0 0 0 3.3 1.5c2.8-2.2 7.2-.1 7.2 4.8 0 4-3.1 6.7-7.5 6.7H9a2.5 2.5 0 0 1-2.5-2.5V17c0-1-.7-1.7-1.7-1.7H3m10-12v2"/>',
     shield: '<path d="M12 22s7-3.8 7-9V5l-7-3-7 3v8c0 5.2 7 9 7 9Z"/><path d="m9 12 2 2 4-4"/>',
     book: '<path d="M12 7c-2-1.6-5.1-2.3-9-1.7v12c3.9-.6 7 .1 9 1.7 2-1.6 5.1-2.3 9-1.7v-12c-3.9-.6-7 .1-9 1.7Zm0 0v12"/>',
+    edit: '<path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14v6Z"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
     right: '<path d="M4 12h15m-6-6 6 6-6 6"/>',
     left: '<path d="M20 12H5m6 6-6-6 6-6"/>',
     down: '<path d="m6 9 6 6 6-6"/>',
+    up: '<path d="m6 15 6-6 6 6"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     cross: '<path d="m6 6 12 12M18 6 6 18"/>',
     minus: '<path d="M5 12h14"/>',
@@ -236,7 +248,8 @@
   });
   profiles = readProfiles();
   activeProfileId = readSelectedProfile();
-  records = loadProfileRecords(activeProfileId);
+  activateCustomTests(activeProfileId);
+  records = activeProfileId ? loadProfileRecords(activeProfileId) : Object.create(null);
   rememberTabProfile(activeProfileId);
   profiles.forEach(function (profile) { profileIdentity(profile.id); });
 
@@ -263,13 +276,14 @@
   }
 
   function belongsToTopic(entry, topicId) {
-    if (topicId === mixed.id) return true;
+    if (topicId === mixed.id) return !entry.section.custom;
     var sectionId = topicById[topicId].parentId || topicId;
     return sectionId === medicineTopic.id ? entry.medicine : entry.section.id === sectionId;
   }
 
   function validAttempt(attempt, topicId) {
     if (!attempt || typeof attempt.review !== "boolean" || typeof attempt.complete !== "boolean" ||
+        (topicById[topicId].custom && attempt.topicVersion !== topicById[topicId].revision) ||
         !Array.isArray(attempt.steps) || !attempt.steps.length || attempt.steps.length > topicTotal(topicId) ||
         (!attempt.review && !isFullLength(attempt.steps.length, topicId)) ||
         !isScore(attempt.cursor, attempt.steps.length - 1) ||
@@ -343,7 +357,15 @@
       return profiles;
     }
     saved.sort(function (a, b) { return a.name.localeCompare(b.name, "ru"); });
-    return [defaultProfile].concat(saved);
+    var hasDefault = storage.getItem(profilePrefix + "default") ||
+      Object.keys(storage).some(function (key) { return key.indexOf(storagePrefix) === 0 && topicById[key.slice(storagePrefix.length)]; });
+    // Storage keys are enumerable in browsers. key() also supports older storage wrappers.
+    for (var item = 0; !hasDefault && item < storage.length; item += 1) {
+      var storedKey = storage.key(item);
+      hasDefault = storedKey && storedKey.indexOf(storagePrefix) === 0 && topicById[storedKey.slice(storagePrefix.length)];
+    }
+    if (hasDefault) defaultProfile.name = storage.getItem(profilePrefix + "default") || "Мой профиль";
+    return (hasDefault ? [defaultProfile] : []).concat(saved);
   }
 
   function readSelectedProfile() {
@@ -360,7 +382,7 @@
       }
       if (findProfile(id)) return id;
     }
-    return defaultProfile.id;
+    return profiles.length ? profiles[0].id : null;
   }
 
   function rememberTabProfile(id) {
@@ -393,6 +415,7 @@
   function selectProfile(id) {
     if (id === activeProfileId || !findProfile(id)) return;
     activeProfileId = id;
+    activateCustomTests(id);
     records = loadProfileRecords(id);
     rememberTabProfile(id);
     if (storageAvailable) {
@@ -402,6 +425,7 @@
         storageAvailable = false;
       }
     }
+    scheduleBackup(id, true);
     renderPage("profile-select", false);
   }
 
@@ -447,6 +471,9 @@
     }
     profileIdentity(id);
     selectProfile(id);
+    codeNotice = id;
+    scheduleBackup(id, true);
+    renderPage("page-title", true);
   }
 
   function profileIdentity(profileId, renew) {
@@ -487,49 +514,15 @@
     return { status: response.status, data: await response.json() };
   }
 
-  async function shareProfile(button) {
-    var profile = findProfile(activeProfileId);
-    var identity = profileIdentity(profile.id);
-    var panel = document.getElementById("profile-share");
-    var output = document.getElementById("profile-share-code");
-    var codeRow = document.getElementById("profile-code-row");
-    var status = document.getElementById("profile-share-status");
-    panel.hidden = false;
-    codeRow.hidden = true;
-    if (!identity) {
-      status.textContent = "В этом браузере не удалось создать код профиля.";
-      return;
-    }
-    var snapshot = { version: 1, name: profile.name, records: Object.create(null) };
-    topics.forEach(function (topic) {
-      var record = records[topic.id];
-      if (record.attempt || record.stats.count) snapshot.records[topic.id] = record;
-    });
-    var payload = { action: "share", code: identity.code, writeKey: identity.writeKey, profile: snapshot };
-    button.disabled = true;
-    status.textContent = "Сохраняем копию профиля…";
-    try {
-      var result = await profileRequest(payload);
-      if (result.status === 409) {
-        identity = profileIdentity(profile.id, true);
-        payload.code = identity.code;
-        payload.writeKey = identity.writeKey;
-        result = await profileRequest(payload);
-      }
-      if (result.status !== 200 || !result.data.ok) throw new Error();
-      output.value = identity.code;
-      codeRow.hidden = false;
-      status.textContent = "Код готов. На другом устройстве нажмите «Добавить по коду».";
-    } catch (error) {
-      status.textContent = "Не удалось сохранить копию. Попробуйте ещё раз.";
-    } finally {
-      button.disabled = false;
-    }
+  function shareProfile() {
+    scheduleBackup(activeProfileId, true);
+    codeNotice = activeProfileId;
+    renderPage("page-title", true);
   }
 
   async function copyProfileCode() {
-    var input = document.getElementById("profile-share-code");
-    var status = document.getElementById("profile-share-status");
+    var input = document.getElementById("recovery-code");
+    var status = document.getElementById("copy-code-status");
     try {
       await window.navigator.clipboard.writeText(input.value);
       status.textContent = "Код скопирован.";
@@ -559,9 +552,8 @@
         status.textContent = "Копия профиля по этому коду не найдена.";
         return;
       }
-      var profile = result.data.profile;
-      if (result.status !== 200 || !profile || profile.version !== 1 || typeof profile.name !== "string" ||
-          !profile.name.trim() || profile.name.length > 32 || !profile.records || typeof profile.records !== "object") throw new Error();
+      var profile = window.PharmProfileModel.snapshot(result.data.profile);
+      if (result.status !== 200 || !profile) throw new Error();
       profiles = readProfiles();
       var base = profile.name.trim();
       var name = base;
@@ -569,8 +561,9 @@
         var suffix = " (" + number + ")";
         name = base.slice(0, 32 - suffix.length) + suffix;
       }
-      addProfile(name, profile.records);
-      document.getElementById("profile-message").textContent = "Копия профиля добавлена.";
+      var importedId = makeId("");
+      profileContents[importedId] = { tests: profile.tests, draft: profile.draft };
+      addRestoredProfile(importedId, name, profile);
     } catch (error) {
       status.textContent = "Не удалось открыть профиль. Попробуйте ещё раз.";
     } finally {
@@ -578,13 +571,252 @@
     }
   }
 
-  function saveRecord(topicId) {
-    if (!storageAvailable) return;
-    try {
-      window.localStorage.setItem(recordPrefix(activeProfileId) + topicId, JSON.stringify(records[topicId]));
-    } catch (error) {
-      storageAvailable = false;
+  function makeId(prefix) {
+    var value = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() :
+      Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+    return prefix + value;
+  }
+
+  function readContent(profileId) {
+    if (!profileId) return { tests: [], draft: null };
+    if (storageAvailable) {
+      try {
+        var raw = window.localStorage.getItem(contentPrefix + profileId);
+        var saved = raw && JSON.parse(raw);
+        if (window.PharmProfileModel.validContent(saved)) profileContents[profileId] = saved;
+      } catch (error) {}
     }
+    if (!profileContents[profileId]) profileContents[profileId] = { tests: [], draft: null };
+    return profileContents[profileId];
+  }
+
+  function activateCustomTests(profileId) {
+    topics.filter(function (topic) { return topic.custom; }).forEach(function (topic) {
+      delete topicById[topic.id];
+      topic.questions.forEach(function (question) { delete questionById[question.id]; });
+    });
+    topics = builtinTopics.slice();
+    customContent = readContent(profileId);
+    customContent.tests.forEach(function (test) {
+      var topic = Object.assign({}, test, { custom: true, icon: "edit", theme: "sky" });
+      topicById[topic.id] = topic;
+      topics.push(topic);
+      topic.questions.forEach(function (question) {
+        questionById[question.id] = { question: question, section: topic };
+      });
+    });
+  }
+
+  function persistContent() {
+    profileContents[activeProfileId] = customContent;
+    if (storageAvailable) {
+      try {
+        window.localStorage.setItem(contentPrefix + activeProfileId, JSON.stringify(customContent));
+      } catch (error) { storageAvailable = false; }
+    }
+    scheduleBackup(activeProfileId);
+    updateLocalStatus();
+  }
+
+  function addRestoredProfile(id, name, snapshot) {
+    profiles.push({ id: id, name: name });
+    customContent = { tests: snapshot.tests, draft: snapshot.draft };
+    profileContents[id] = customContent;
+    if (storageAvailable) {
+      try {
+        window.localStorage.setItem(contentPrefix + id, JSON.stringify(customContent));
+        window.localStorage.setItem(profilePrefix + id, name);
+      } catch (error) { storageAvailable = false; }
+    }
+    activeProfileId = id;
+    activateCustomTests(id);
+    var restored = Object.create(null);
+    topics.forEach(function (topic) {
+      restored[topic.id] = parseRecord(JSON.stringify(snapshot.records[topic.id]), topic.id);
+      if (storageAvailable) {
+        try { window.localStorage.setItem(recordPrefix(id) + topic.id, JSON.stringify(restored[topic.id])); }
+        catch (error) { storageAvailable = false; }
+      }
+    });
+    profileRecords[id] = restored;
+    records = restored;
+    rememberTabProfile(id);
+    if (storageAvailable) {
+      try { window.localStorage.setItem(selectedProfileKey, id); } catch (error) { storageAvailable = false; }
+    }
+    profileIdentity(id);
+    codeNotice = id;
+    scheduleBackup(id, true);
+    renderPage("page-title", true);
+  }
+
+  function backupSnapshot(profileId) {
+    var profile = findProfile(profileId);
+    var content = readContent(profileId);
+    var saved = Object.create(null);
+    var ids = builtinTopics.map(function (topic) { return topic.id; }).concat(content.tests.map(function (test) { return test.id; }));
+    ids.forEach(function (id) {
+      var record = profileRecords[profileId] && profileRecords[profileId][id];
+      if (storageAvailable) {
+        try {
+          var raw = window.localStorage.getItem(recordPrefix(profileId) + id);
+          if (raw) record = JSON.parse(raw);
+        } catch (error) {}
+      }
+      if (record && (record.attempt || record.stats && record.stats.count)) saved[id] = record;
+    });
+    return { version: 2, name: profile.name, records: saved, tests: content.tests, draft: content.draft };
+  }
+
+  function scheduleBackup(profileId, immediate) {
+    if (!profileId || typeof window.fetch !== "function" || typeof window.setTimeout !== "function") return;
+    var job = backupJobs[profileId] || (backupJobs[profileId] = { pending: false, running: false, status: "waiting" });
+    job.pending = true;
+    if (!job.running) job.status = "waiting";
+    updateBackupStatus();
+    window.clearTimeout(job.timer);
+    job.timer = window.setTimeout(function () { syncBackup(profileId); }, immediate ? 0 : 800);
+  }
+
+  async function syncBackup(profileId) {
+    var job = backupJobs[profileId];
+    if (!job || job.running || !findProfile(profileId)) return;
+    job.running = true;
+    job.status = "saving";
+    updateBackupStatus();
+    try {
+      while (job.pending) {
+        job.pending = false;
+        var identity = profileIdentity(profileId);
+        if (!identity) throw new Error();
+        var payload = { action: "share", code: identity.code, writeKey: identity.writeKey,
+          revision: identity.revision || 0, profile: backupSnapshot(profileId) };
+        var result = await profileRequest(payload);
+        if (result.status === 409 && result.data.error === "stale") {
+          identity.revision = result.data.revision;
+          payload.revision = identity.revision;
+          payload.profile = backupSnapshot(profileId);
+          result = await profileRequest(payload);
+        }
+        if (result.status !== 200 || !result.data.ok) {
+          job.status = result.status === 413 ? "large" : "error";
+          throw new Error();
+        }
+        identity.revision = result.data.revision;
+        profileIdentities[profileId] = identity;
+        if (storageAvailable) {
+          try { window.localStorage.setItem(profileCodePrefix + profileId, JSON.stringify(identity)); } catch (error) {}
+        }
+        job.status = "saved";
+      }
+    } catch (error) {
+      if (job.status !== "large") job.status = "error";
+    } finally {
+      job.running = false;
+      updateBackupStatus();
+      if (job.pending) scheduleBackup(profileId);
+    }
+  }
+
+  function backupStatus() {
+    var job = backupJobs[activeProfileId];
+    if (!job) return "Для резервной копии подключитесь к интернету.";
+    if (job.status === "saved") return "Резервная копия обновлена. Код восстановит прогресс и свои тесты.";
+    if (job.status === "saving" || job.status === "waiting") return "Обновляем резервную копию…";
+    if (!storageAvailable) return "Сохранение в браузере недоступно. Не закрывайте страницу до успешной резервной копии и сохраните код.";
+    if (job.status === "large") return "Данные сохранены в браузере. Резервная копия превышает допустимый размер.";
+    return "Сейчас резервная копия недоступна. Данные остаются в браузере. Повторим при подключении.";
+  }
+
+  function updateBackupStatus() {
+    document.querySelectorAll("[data-backup-status]").forEach(function (element) { element.textContent = backupStatus(); });
+  }
+
+  function updateLocalStatus() {
+    var label = document.getElementById("draft-status");
+    if (label) label.textContent = storageAvailable ? "Черновик сохранён в браузере" : "Черновик доступен до закрытия страницы";
+  }
+
+  function newQuestion() {
+    return { id: makeId("ownq-"), text: "", options: ["", "", "", ""], correct: 0, explanation: "" };
+  }
+
+  function openEditor(testId) {
+    var test = customContent.tests.find(function (item) { return item.id === testId; });
+    if (test) {
+      customContent.draft = JSON.parse(JSON.stringify(test));
+      customContent.draft.questions.forEach(function (question) { question.correct = 0; });
+    } else if (!customContent.draft) {
+      customContent.draft = { id: makeId("own-"), title: "", description: "", revision: "",
+        questions: [newQuestion()] };
+    }
+    persistContent();
+    window.location.hash = "#/create";
+    renderPage("page-title", true);
+  }
+
+  function collectDraft() {
+    var form = document.getElementById("test-editor");
+    if (!form || !customContent.draft) return;
+    var draft = customContent.draft;
+    draft.title = form.elements.namedItem("title").value;
+    draft.description = form.elements.namedItem("description").value;
+    form.querySelectorAll("[data-question]").forEach(function (block, index) {
+      var question = draft.questions[index];
+      question.text = block.querySelector('[name="question-text"]').value;
+      question.explanation = block.querySelector('[name="explanation"]').value;
+      question.options = Array.from(block.querySelectorAll('[name="option-text"]')).map(function (input) { return input.value; });
+      var checked = block.querySelector('input[type="radio"]:checked');
+      question.correct = checked ? Number(checked.value) : 0;
+    });
+    persistContent();
+  }
+
+  function publishCustomTest() {
+    collectDraft();
+    var draft = customContent.draft;
+    var test = JSON.parse(JSON.stringify(draft));
+    test.title = test.title.trim();
+    test.description = test.description.trim();
+    test.questions.forEach(function (question) {
+      question.text = question.text.trim();
+      question.options = question.options.map(function (option) { return option.trim(); });
+      var correct = question.options.splice(question.correct, 1)[0];
+      question.options.unshift(correct);
+      delete question.correct;
+    });
+    if (!window.PharmProfileModel.validTest(test, false)) {
+      var feedback = document.getElementById("editor-feedback");
+      feedback.textContent = "Заполните название и каждый вопрос. Укажите минимум четыре разных варианта ответа и отметьте верный.";
+      feedback.focus();
+      return;
+    }
+    var prior = customContent.tests.find(function (item) { return item.id === test.id; });
+    var changedQuestions = !prior || JSON.stringify(prior.questions) !== JSON.stringify(test.questions);
+    test.revision = changedQuestions ? makeId("") : prior.revision;
+    test.revision = changedQuestions ? makeId("") : prior.revision;
+    if (prior && changedQuestions &&
+        records[test.id] && records[test.id].attempt && !records[test.id].attempt.complete &&
+        !window.confirm("Сохранить изменения? Текущая попытка этого теста начнётся заново.")) return;
+    customContent.tests = customContent.tests.filter(function (item) { return item.id !== test.id; }).concat(test);
+    customContent.draft = null;
+    persistContent();
+    activateCustomTests(activeProfileId);
+    if (changedQuestions) records[test.id] = parseRecord(null, test.id);
+    saveRecord(test.id);
+    window.location.hash = "#/my-tests";
+    renderPage("page-title", true);
+  }
+
+  function saveRecord(topicId) {
+    if (storageAvailable) {
+      try {
+        window.localStorage.setItem(recordPrefix(activeProfileId) + topicId, JSON.stringify(records[topicId]));
+      } catch (error) {
+        storageAvailable = false;
+      }
+    }
+    scheduleBackup(activeProfileId);
   }
 
   function shuffledBankQuestions(topicId, bank) {
@@ -624,6 +856,7 @@
     });
     return {
       review: Boolean(reviewIds),
+      topicVersion: topicById[topicId].revision,
       complete: false,
       cursor: 0,
       selected: null,
@@ -695,10 +928,12 @@
 
   function routeFromHash() {
     var route = window.location.hash.slice(1);
+    if (route === "/my-tests") return { page: "custom" };
+    if (route === "/create") return { page: "editor" };
     if (route === "/progress") return { page: "progress" };
     if (route === "/sections") return { page: "sections" };
     if (route === "/medicines") return { page: "modes", topicId: medicineTopic.id };
-    var match = /^\/(test|section)\/([a-z-]+)$/.exec(route);
+    var match = /^\/(test|section)\/([a-z0-9-]+)$/.exec(route);
     if (match) {
       var topicId = match[2];
       if (match[1] === "test" && topicById[topicId]) return { page: "test", topicId: topicId };
@@ -726,6 +961,9 @@
   }
 
   function backLink(sectionId) {
+    if (topicById[sectionId] && topicById[sectionId].custom) {
+      return '<a class="back-link" href="#/my-tests">' + icon("left", true) + 'Мои тесты</a>';
+    }
     var hasModes = Boolean(modesBySection[sectionId]);
     return '<a class="back-link" href="' + (hasModes ? modesLink(sectionId) : '#/sections') + '">' +
       icon("left", true) + (hasModes ? 'К выбору теста' : 'Все разделы') + '</a>';
@@ -757,7 +995,9 @@
       '<section class="section-list" id="sections" aria-labelledby="sections-title">' +
       '<div class="section-heading"><h2 id="sections-title" tabindex="-1">Разделы</h2><p>' +
       countLabel(sectionCards.length, "раздел", "раздела", "разделов") + ' · ' + questionsLabel(count) + '</p></div>' +
-      '<div class="topic-grid">' + sectionCards.map(function (topic) { return renderTopicCard(topic); }).join("") + '</div></section>';
+      '<div class="topic-grid">' + sectionCards.filter(function (topic) { return !topic.supplemental; }).map(function (topic) { return renderTopicCard(topic); }).join("") + '</div>' +
+      '<div class="section-heading supplement-heading"><div><h2>Дополнительные конспекты</h2><p>Отдельная практика по шести новым материалам</p></div></div>' +
+      '<div class="topic-grid supplement-grid">' + sectionCards.filter(function (topic) { return topic.supplemental; }).map(function (topic) { return renderTopicCard(topic); }).join("") + '</div></section>';
   }
 
   function renderTopicCard(topic, modeCard) {
@@ -985,20 +1225,108 @@
       '<form class="profile-form" id="profile-form" hidden><label for="profile-name">Имя профиля</label>' +
       '<div class="profile-row"><input id="profile-name" name="profile-name" type="text" maxlength="32" autocomplete="off" required>' +
       '<button class="button" type="submit">Добавить</button></div></form>' +
-      '<div class="profile-tools"><button class="button button-secondary" type="button" data-action="share-profile" aria-controls="profile-share">Поделиться кодом</button>' +
+      '<div class="profile-tools"><button class="button button-secondary" type="button" data-action="share-profile">Код и резервная копия</button>' +
       '<button class="button button-secondary" type="button" data-action="profile-import-form" aria-expanded="false" aria-controls="profile-import-form">Добавить по коду</button></div>' +
-      '<div class="profile-form" id="profile-share" hidden><p class="profile-note">По коду можно открыть копию текущего прогресса на другом устройстве.</p>' +
-      '<div class="profile-row" id="profile-code-row" hidden><input class="profile-code" id="profile-share-code" type="text" aria-label="Код профиля" readonly>' +
-      '<button class="button" type="button" data-action="copy-profile-code">Копировать</button></div>' +
-      '<p class="profile-message" id="profile-share-status" role="status"></p></div>' +
       '<form class="profile-form" id="profile-import-form" hidden><label for="profile-import-code">Код профиля из 16 символов</label>' +
       '<div class="profile-row"><input class="profile-code" id="profile-import-code" name="profile-code" type="text" maxlength="32" ' +
       'autocomplete="off" autocapitalize="characters" spellcheck="false" required><button class="button" type="submit">Добавить копию</button></div>' +
       '<p class="profile-message" id="profile-import-status" role="status"></p></form>' +
       '<p class="profile-message" id="profile-message" role="status"></p>' +
       '<p class="profile-note" id="profile-note">' + (storageAvailable
-        ? "Прогресс сохраняется отдельно для каждого профиля в этом браузере."
+        ? "Прогресс и свои тесты сохраняются отдельно для каждого профиля в этом браузере. Сохраните код профиля для восстановления."
         : "Сохранение в браузере недоступно. Прогресс доступен до закрытия страницы.") + '</p></section>';
+  }
+
+  function renderWelcome() {
+    var restoring = welcomeMode === "restore";
+    var form = restoring ? '<form id="profile-import-form"><label for="profile-import-code">Код из 16 символов</label>' +
+      '<input id="profile-import-code" class="profile-code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" required placeholder="XXXX XXXX XXXX XXXX">' +
+      '<p class="form-message" id="profile-import-status" role="status"></p><button class="button" type="submit">Восстановить профиль</button></form>' :
+      '<form id="profile-form"><label for="profile-name">Название профиля</label>' +
+      '<input id="profile-name" maxlength="32" placeholder="Как вас называть?" autocomplete="nickname" required>' +
+      '<p class="field-help">Придумайте имя, по которому узнаете свой профиль.</p><button class="button" type="submit">Создать профиль ' + icon("right", true) + '</button></form>';
+    return '<section class="welcome enter" aria-labelledby="page-title"><div class="welcome-visual"><img src="./assets/icon.svg" width="70" height="70" alt="">' +
+      '<h1 id="page-title" tabindex="-1">Ваше место<br>для практики</h1><p>Проходите курс, создавайте свои тесты и возвращайтесь к результатам в своём темпе.</p>' +
+      '<div class="welcome-detail">' + icon("user", true) + '<span>Свой профиль, прогресс и коллекция тестов</span></div></div>' +
+      '<div class="welcome-form"><div class="segmented" role="group" aria-label="Вход в профиль">' +
+      '<button type="button" data-action="welcome-create" aria-pressed="' + !restoring + '">Новый профиль</button>' +
+      '<button type="button" data-action="welcome-restore" aria-pressed="' + restoring + '">У меня есть код</button></div>' +
+      '<h2>' + (restoring ? "Вернуться к своим тестам" : "Начнём с имени") + '</h2>' + form +
+      '<p class="welcome-note">Сохраните код профиля. Он поможет восстановить последнюю резервную копию прогресса и своих тестов.</p></div></section>';
+  }
+
+  function renderRecoveryCode() {
+    var identity = profileIdentity(activeProfileId);
+    return '<section class="recovery-panel enter" aria-labelledby="page-title"><span class="recovery-symbol">' + icon("shield") + '</span>' +
+      '<h1 id="page-title" tabindex="-1">Сохраните код профиля</h1><p>Это ключ к вашим тестам и прогрессу. Скопируйте его в заметки или другое надёжное место.</p>' +
+      '<label class="visually-hidden" for="recovery-code">Код профиля</label><input id="recovery-code" class="recovery-code" readonly value="' + (identity ? identity.code : '') + '">' +
+      '<button class="button button-secondary" type="button" data-action="copy-profile-code">' + icon("file", true) + 'Скопировать код</button>' +
+      '<p id="copy-code-status" class="field-help" role="status"></p><p class="backup-status" data-backup-status role="status">' + backupStatus() + '</p>' +
+      '<div class="recovery-info"><p>Профиль запоминается в этом браузере. Очистка данных браузера может удалить местные сохранения.</p>' +
+      '<p>По коду можно восстановить копию на другом устройстве. У восстановленной копии будет свой код. Передавайте код только тем, кому хотите открыть доступ к тестам.</p></div>' +
+      '<div class="recovery-actions"><button type="button" class="button" data-action="code-continue">Я сохранил код, продолжить ' + icon("right", true) + '</button>' +
+      '<button type="button" class="text-button" data-action="backup-retry">Обновить резервную копию</button></div></section>';
+  }
+
+  function renderCustomTests() {
+    var cards = customContent.tests.map(function (test) {
+      var record = records[test.id];
+      var label = record.attempt ? (record.attempt.complete ? "Результат" : "Продолжить") : "Пройти тест";
+      return '<article class="custom-card enter"><div class="custom-card-top"><span class="tile-icon">' + icon("edit") + '</span>' +
+        '<span>' + questionsLabel(test.questions.length) + '</span></div><h2>' + escapeHtml(test.title) + '</h2>' +
+        (test.description ? '<p>' + escapeHtml(test.description) + '</p>' : '') +
+        (record.stats.count ? '<p class="custom-result">Лучший результат ' + percent(record.stats.best, record.stats.bestTotal) + '%</p>' : '') +
+        '<div class="custom-card-actions"><a class="button" href="' + testLink(test.id) + '">' + label + icon("right", true) + '</a>' +
+        '<button class="icon-button" type="button" data-action="edit-test" data-id="' + test.id + '" aria-label="Редактировать ' + escapeHtml(test.title) + '">' + icon("edit", true) + '</button>' +
+        '<button class="icon-button" type="button" data-action="delete-test" data-id="' + test.id + '" aria-label="Удалить ' + escapeHtml(test.title) + '">' + icon("trash", true) + '</button></div></article>';
+    }).join("");
+    return '<div class="creator-page"><div class="creator-heading"><div><h1 id="page-title" tabindex="-1">Мои тесты</h1>' +
+      '<p>Коллекция профиля ' + escapeHtml(findProfile(activeProfileId).name) + '</p></div>' +
+      '<button class="button" type="button" data-action="create-test">' + icon("plus", true) + (customContent.draft ? 'Продолжить черновик' : 'Создать тест') + '</button></div>' +
+      '<div class="creator-backup">' + icon("shield", true) + '<div><p data-backup-status>' + backupStatus() + '</p>' +
+      '<button class="text-button" type="button" data-action="share-profile">Сохранить код профиля</button></div></div>' +
+      (cards ? '<div class="custom-grid">' + cards + '</div>' :
+        '<section class="custom-empty enter"><span class="empty-symbol">' + icon("edit") + '</span><h2>Первый тест начинается с вопроса</h2>' +
+        '<p>Добавьте свои вопросы, укажите варианты и отметьте правильный ответ. Готовый тест появится здесь.</p>' +
+        '<button class="button" type="button" data-action="create-test">' + icon("plus", true) + 'Создать первый тест</button></section>') + '</div>';
+  }
+
+  function renderEditor() {
+    var draft = customContent.draft;
+    if (!draft) return renderCustomTests();
+    var questions = draft.questions.map(function (question, index) {
+      var key = "editor-" + index;
+      return '<section class="editor-question enter" data-question="' + index + '" id="' + key + '"><div class="question-editor-heading">' +
+        '<h2>Вопрос ' + (index + 1) + '</h2><div class="question-tools">' +
+        '<button type="button" class="icon-button" data-action="move-question" data-index="' + index + '" data-direction="-1" aria-label="Переместить вопрос вверх"' + (index === 0 ? ' disabled' : '') + '>' + icon("up", true) + '</button>' +
+        '<button type="button" class="icon-button" data-action="move-question" data-index="' + index + '" data-direction="1" aria-label="Переместить вопрос вниз"' + (index === draft.questions.length - 1 ? ' disabled' : '') + '>' + icon("down", true) + '</button>' +
+        '<button type="button" class="icon-button" data-action="remove-question" data-index="' + index + '" aria-label="Удалить вопрос ' + (index + 1) + '"' + (draft.questions.length === 1 ? ' disabled' : '') + '>' + icon("trash", true) + '</button></div></div>' +
+        '<label for="' + key + '-text">Текст вопроса</label><textarea name="question-text" id="' + key + '-text" rows="2" maxlength="10000" required placeholder="Что вы хотите спросить?">' + escapeHtml(question.text) + '</textarea>' +
+        '<fieldset class="editor-options"><legend>Варианты ответа</legend><p class="field-help">Отметьте кружком один правильный вариант.</p>' +
+        question.options.map(function (option, position) {
+          return '<div class="editor-option"><label class="correct-option" title="Правильный ответ"><input type="radio" name="correct-' + index + '" value="' + position + '"' +
+            (question.correct === position ? ' checked' : '') + ' aria-label="Вариант ' + letters[position] + ' правильный"><span>' + icon("check", true) + '</span></label>' +
+            '<label class="visually-hidden" for="' + key + '-option-' + position + '">Вариант ' + letters[position] + '</label>' +
+            '<input type="text" name="option-text" id="' + key + '-option-' + position + '" maxlength="3000" required placeholder="Вариант ' + letters[position] + '" value="' + escapeHtml(option) + '">' +
+            (question.options.length > 4 ? '<button class="icon-button" type="button" data-action="remove-option" data-index="' + index + '" data-option="' + position + '" aria-label="Удалить вариант ' + letters[position] + '">' + icon("cross", true) + '</button>' : '') + '</div>';
+        }).join("") + '</fieldset>' +
+        (question.options.length < 8 ? '<button type="button" class="text-button" data-action="add-option" data-index="' + index + '">' + icon("plus", true) + 'Добавить вариант</button>' : '') +
+        '<label class="explanation-label" for="' + key + '-explanation">Пояснение <span>по желанию</span></label>' +
+        '<textarea name="explanation" id="' + key + '-explanation" rows="2" maxlength="10000" placeholder="Почему этот ответ верный?">' + escapeHtml(question.explanation) + '</textarea></section>';
+    }).join("");
+    return '<div class="editor-page"><a class="back-link" href="#/my-tests">' + icon("left", true) + 'Мои тесты</a>' +
+      '<div class="creator-heading"><div><h1 id="page-title" tabindex="-1">Конструктор теста</h1><p id="draft-status" role="status">' +
+      (storageAvailable ? 'Черновик сохранён в браузере' : 'Черновик доступен до закрытия страницы') + '</p></div></div>' +
+      '<form id="test-editor"><div class="editor-layout"><aside class="editor-sidebar"><section class="editor-meta">' +
+      '<label for="editor-title">Название теста</label><input name="title" id="editor-title" maxlength="160" required placeholder="Например, подготовка к зачёту" value="' + escapeHtml(draft.title) + '">' +
+      '<label for="editor-description">Описание <span>по желанию</span></label><textarea name="description" id="editor-description" rows="3" maxlength="2000" placeholder="Какие темы здесь собраны?">' + escapeHtml(draft.description) + '</textarea>' +
+      '<p class="editor-count">' + questionsLabel(draft.questions.length) + '</p><nav aria-label="Вопросы теста" class="question-nav">' +
+      draft.questions.map(function (question, index) { return '<a href="#editor-' + index + '" data-action="scroll-question" data-index="' + index + '">' + (index + 1) + '</a>'; }).join("") + '</nav>' +
+      '<p class="field-help">Вопросы и варианты перемешиваются при каждой новой попытке.</p>' +
+      (customContent.tests.some(function (test) { return test.id === draft.id; }) ? '<p class="field-help">Изменение вопросов начнёт статистику этого теста заново.</p>' : '') + '</section></aside>' +
+      '<div class="editor-content">' + questions + '<button type="button" class="add-question" data-action="add-question">' + icon("plus") + 'Добавить вопрос</button>' +
+      '<p id="editor-feedback" class="form-message" role="alert" tabindex="-1"></p></div></div><div class="editor-savebar">' +
+      '<span>Тест будет доступен в этом профиле</span><button class="button" type="submit">' + icon("check", true) + 'Сохранить тест</button></div></form></div>';
   }
 
   function renderProgress() {
@@ -1026,7 +1354,27 @@
 
   function renderPage(focusId, toTop) {
     var route = routeFromHash();
-    if (route.page === "test") {
+    if (!activeProfileId) {
+      app.innerHTML = renderWelcome();
+      document.title = "Ваш профиль - ФармТест";
+      if (focusId) setFocus(focusId, !toTop);
+      if (toTop) window.scrollTo(0, 0);
+      return;
+    }
+    if (codeNotice === activeProfileId) {
+      app.innerHTML = renderRecoveryCode();
+      document.title = "Код профиля - ФармТест";
+      if (focusId) setFocus(focusId, !toTop);
+      if (toTop) window.scrollTo(0, 0);
+      return;
+    }
+    if (route.page === "custom" || route.page === "editor" && !customContent.draft) {
+      app.innerHTML = renderCustomTests();
+      document.title = "Мои тесты - ФармТест";
+    } else if (route.page === "editor") {
+      app.innerHTML = renderEditor();
+      document.title = "Конструктор - ФармТест";
+    } else if (route.page === "test") {
       var topic = topicById[route.topicId];
       var attempt = openTest(topic.id);
       app.innerHTML = attempt.complete ? renderResults(topic, attempt) : renderTest(topic, attempt);
@@ -1044,6 +1392,7 @@
     }
     document.querySelectorAll("[data-nav]").forEach(function (link) {
       var active = link.dataset.nav === route.page ||
+        (link.dataset.nav === "custom" && (route.page === "editor" || route.page === "test" && topicById[route.topicId].custom)) ||
         (link.dataset.nav === "sections" && (route.page === "home" || route.page === "modes"));
       if (active) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
@@ -1059,6 +1408,7 @@
 
   app.addEventListener("change", function (event) {
     var route = routeFromHash();
+    if (route.page === "editor") { collectDraft(); return; }
     if (route.page !== "test" || event.target.name !== "answer") return;
     var attempt = records[route.topicId].attempt;
     var step = attempt.steps[attempt.cursor];
@@ -1073,9 +1423,15 @@
   app.addEventListener("input", function (event) {
     if (event.target.id === "profile-name") event.target.setCustomValidity("");
     if (event.target.id === "profile-import-code") document.getElementById("profile-import-status").textContent = "";
+    if (routeFromHash().page === "editor") collectDraft();
   });
 
   app.addEventListener("submit", function (event) {
+    if (event.target.id === "test-editor") {
+      event.preventDefault();
+      publishCustomTest();
+      return;
+    }
     if (event.target.id === "profile-form") {
       event.preventDefault();
       submitProfile();
@@ -1110,6 +1466,66 @@
     var button = event.target.closest("[data-action]");
     if (!button) return;
     var action = button.dataset.action;
+    if (action === "welcome-create" || action === "welcome-restore") {
+      welcomeMode = action === "welcome-create" ? "create" : "restore";
+      renderPage("page-title", false);
+      return;
+    }
+    if (action === "code-continue") {
+      if (storageAvailable) {
+        try { window.localStorage.setItem(codeSeenPrefix + activeProfileId, "yes"); } catch (error) {}
+      }
+      codeNotice = null;
+      renderPage("page-title", true);
+      return;
+    }
+    if (action === "backup-retry") { scheduleBackup(activeProfileId, true); return; }
+    if (action === "create-test" || action === "edit-test") {
+      if (action === "edit-test" && customContent.draft && customContent.draft.id !== button.dataset.id &&
+          !window.confirm("Открыть другой тест? Текущий черновик будет заменён.")) return;
+      openEditor(button.dataset.id);
+      return;
+    }
+    if (action === "delete-test") {
+      if (!window.confirm("Удалить этот тест и его результаты из профиля?")) return;
+      var id = button.dataset.id;
+      customContent.tests = customContent.tests.filter(function (test) { return test.id !== id; });
+      if (customContent.draft && customContent.draft.id === id) customContent.draft = null;
+      persistContent();
+      if (storageAvailable) {
+        try { window.localStorage.removeItem(recordPrefix(activeProfileId) + id); } catch (error) {}
+      }
+      delete records[id];
+      activateCustomTests(activeProfileId);
+      renderPage("page-title", false);
+      return;
+    }
+    if (["add-question", "remove-question", "move-question", "add-option", "remove-option", "scroll-question"].indexOf(action) !== -1) {
+      event.preventDefault();
+      collectDraft();
+      var draft = customContent.draft;
+      var index = Number(button.dataset.index);
+      if (action === "scroll-question") { setFocus("editor-" + index + "-text", true); return; }
+      if (action === "add-question") { draft.questions.push(newQuestion()); index = draft.questions.length - 1; }
+      if (action === "remove-question" && draft.questions.length > 1) draft.questions.splice(index, 1);
+      if (action === "move-question") {
+        var next = index + Number(button.dataset.direction);
+        if (next < 0 || next >= draft.questions.length) return;
+        draft.questions.splice(next, 0, draft.questions.splice(index, 1)[0]);
+        index = next;
+      }
+      if (action === "add-option" && draft.questions[index].options.length < 8) draft.questions[index].options.push("");
+      if (action === "remove-option" && draft.questions[index].options.length > 4) {
+        var position = Number(button.dataset.option);
+        var question = draft.questions[index];
+        question.options.splice(position, 1);
+        if (question.correct >= position) question.correct = Math.max(0, question.correct - 1);
+      }
+      persistContent();
+      renderPage(null, false);
+      if (action === "add-question" || action === "move-question") setFocus("editor-" + index + "-text", true);
+      return;
+    }
     if (action === "profile-form" || action === "profile-import-form") {
       var form = document.getElementById(action);
       form.hidden = !form.hidden;
@@ -1220,6 +1636,12 @@
       return;
     }
     if (!storageAvailable || !event.key) return;
+    if (event.key === contentPrefix + activeProfileId) {
+      activateCustomTests(activeProfileId);
+      records = loadProfileRecords(activeProfileId);
+      renderPage(null, false);
+      return;
+    }
     if (event.key.indexOf(profilePrefix) === 0) {
       profiles = readProfiles();
       profiles.forEach(function (profile) { profileIdentity(profile.id); });
@@ -1236,5 +1658,10 @@
   });
 
   applyTheme(isDarkTheme() ? "dark" : "light");
+  window.addEventListener("online", function () { scheduleBackup(activeProfileId, true); });
+  if (activeProfileId) scheduleBackup(activeProfileId);
+  if (activeProfileId && storageAvailable) {
+    try { if (!window.localStorage.getItem(codeSeenPrefix + activeProfileId)) codeNotice = activeProfileId; } catch (error) {}
+  }
   renderPage(null, false);
 })();
